@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk STK Push Dispatcher</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+    
+    <!-- Input Form -->
+    <div class="bg-white p-6 rounded-lg shadow-md">
+      <h2 class="text-xl font-bold mb-4 text-gray-800">Bulk STK Push Sender</h2>
+      <form id="bulkForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Phone Numbers (One per line or comma-separated)</label>
+          <textarea id="numbers" rows="6" placeholder="0712345678&#10;254798765432" required class="mt-1 w-full border rounded-md p-2 text-sm border-gray-300 focus:ring-blue-500 focus:border-blue-500"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Amount (KES)</label>
+          <input type="number" id="amount" value="100" min="1" required class="mt-1 w-full border rounded-md p-2 text-sm border-gray-300">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Account Reference</label>
+          <input type="text" id="accountReference" value="INV-BULK" required class="mt-1 w-full border rounded-md p-2 text-sm border-gray-300">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Transaction Description</label>
+          <input type="text" id="transactionDesc" value="Bulk Order Payment" class="mt-1 w-full border rounded-md p-2 text-sm border-gray-300">
+        </div>
+
+        <button type="submit" id="submitBtn" class="w-full bg-blue-600 text-white font-semibold py-2 rounded-md hover:bg-blue-700 transition">
+          Dispatch Bulk Requests
+        </button>
+      </form>
+    </div>
+
+    <!-- Live Execution Logs -->
+    <div class="bg-white p-6 rounded-lg shadow-md flex flex-col h-full">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold text-gray-800">Execution Logs</h2>
+        <span id="rateBadge" class="text-xs bg-yellow-100 text-yellow-800 px-2.5 py-0.5 rounded-full font-medium">15 req/min enforced</span>
+      </div>
+      <div id="logs" class="flex-1 bg-gray-900 text-green-400 p-4 rounded-md font-mono text-xs overflow-y-auto max-h-[450px] space-y-1">
+        <div class="text-gray-500">> System initialized. Waiting for task...</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const logBox = document.getElementById('logs');
+    const form = document.getElementById('bulkForm');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Subscribe to SSE for live updates
+    const evtSource = new EventSource('/events');
+    evtSource.onmessage = (event) => {
+      const log = JSON.parse(event.data);
+      const entry = document.createElement('div');
+      
+      if (log.status === 'SUCCESS') {
+        entry.className = 'text-green-400';
+        entry.textContent = `[${log.index}/${log.total}] SUCCESS -> ${log.phone}`;
+      } else if (log.status === 'FAILED') {
+        entry.className = 'text-red-400';
+        entry.textContent = `[${log.index}/${log.total}] FAILED -> ${log.phone} (${log.error})`;
+      } else if (log.status === 'COMPLETE') {
+        entry.className = 'text-blue-400 font-bold';
+        entry.textContent = `> ${log.message}`;
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50');
+      }
+
+      logBox.appendChild(entry);
+      logBox.scrollTop = logBox.scrollHeight;
+    };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.classList.add('opacity-50');
+
+      const payload = {
+        numbers: document.getElementById('numbers').value,
+        amount: document.getElementById('amount').value,
+        accountReference: document.getElementById('accountReference').value,
+        transactionDesc: document.getElementById('transactionDesc').value
+      };
+
+      try {
+        const res = await fetch('/api/stkpush/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        const startLog = document.createElement('div');
+        startLog.className = 'text-yellow-400';
+        startLog.textContent = `> ${data.message} Total targets: ${data.count}. Queue started (4s interval)...`;
+        logBox.appendChild(startLog);
+      } catch (err) {
+        alert(err.message);
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50');
+      }
+    });
+  </script>
+</body>
+</html>
